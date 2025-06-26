@@ -1,0 +1,98 @@
+mode: deployment
+
+image:
+  repository: "ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib"
+
+replicaCount: 1
+
+clusterRole:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources:
+        - nodes
+        - nodes/proxy
+        - services
+        - endpoints
+        - pods
+      verbs: ["get", "list", "watch"]
+    - apiGroups:
+        - extensions
+      resources:
+        - ingresses
+      verbs: ["get", "list", "watch"]
+    - nonResourceURLs: ["/metrics", "/metrics/cadvisor", "/api/v1/nodes/*/proxy/metrics", "/api/v1/nodes/*/proxy/metrics/cadvisor"]
+      verbs: ["get"]
+
+extraEnvs:
+  - name: K8S_POD_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.name
+
+config:
+    receivers:
+      prometheus:
+        # target_allocator:
+        #   endpoint: http://target-allocator-opentelemetry-target-allocator-ta
+        #   interval: 30s
+        #   collector_id: ${env:K8S_POD_NAME}
+        config:
+          scrape_configs:
+            - job_name: "kubernetes-nodes"
+              scheme: https
+              tls_config:
+                ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                insecure_skip_verify: true
+              authorization:
+                credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+
+              kubernetes_sd_configs:
+                - role: node
+
+              relabel_configs:
+                - action: labelmap
+                  regex: __meta_kubernetes_node_label_(.+)
+                - target_label: __address__
+                  replacement: kubernetes.default.svc:443
+                - source_labels: [__meta_kubernetes_node_name]
+                  regex: (.+)
+                  target_label: __metrics_path__
+                  replacement: /api/v1/nodes/$${1}/proxy/metrics
+
+            - job_name: "kubernetes-cadvisor"
+              scheme: https
+              metrics_path: /metrics/cadvisor
+              tls_config:
+                ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                insecure_skip_verify: true
+              authorization:
+                credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+
+              kubernetes_sd_configs:
+                - role: node
+              relabel_configs:
+                - action: labelmap
+                  regex: __meta_kubernetes_node_label_(.+)
+                - target_label: __address__
+                  replacement: kubernetes.default.svc:443
+                - source_labels: [__meta_kubernetes_node_name]
+                  regex: (.+)
+                  target_label: __metrics_path__
+                  replacement: /api/v1/nodes/$${1}/proxy/metrics/cadvisor
+    exporters:
+      prometheusremotewrite:
+        endpoint: http://prometheus:9090/api/v1/write
+    service:
+      telemetry:
+        logs:
+          level: DEBUG
+      pipelines:
+        metrics:
+          exporters:
+            - prometheusremotewrite
+          processors:
+            - batch
+          receivers:
+            - otlp
+            - prometheus
