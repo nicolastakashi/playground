@@ -54,7 +54,7 @@ spec:
       serviceAccountName: prometheus
       containers:
         - name: prometheus
-          image: quay.io/prometheus/prometheus
+          image: quay.io/prometheus/prometheus:v3.5.0-rc.1
           args:
             - --web.enable-remote-write-receiver
             - --config.file=/etc/prometheus/prometheus.yml
@@ -93,10 +93,7 @@ data:
     global:
       scrape_interval: 15s
       evaluation_interval: 15s
-    scrape_configs:
-      - job_name: 'prometheus'
-        static_configs:
-          - targets: ['localhost:9090']
+    scrape_configs: []
       # - job_name: "kubernetes-cadvisor"
       #   scheme: https
       #   metrics_path: /metrics/cadvisor
