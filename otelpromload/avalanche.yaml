@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: avalanche
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: avalanche
+  template:
+    metadata:
+      labels:
+        app: avalanche
+    spec:
+      containers:
+      - name: avalanche
+        image: quay.io/prometheuscommunity/avalanche:latest
+        args:
+        - --gauge-metric-count=100
+        - --series-count=1000
+        - --value-interval=1
+        - --label-count=8
+        - --const-label=instance=avalanche
+        - --const-label=job=avalanche
+        - --port=9001
+        resources: 
+          limits: 
+            cpu: "500m"
+            memory: 256Mi
+          requests:
+            cpu: "100m"
+            memory: 64Mi
+        ports:
+        - containerPort: 9001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: avalanche
+spec:
+  selector:
+    app: avalanche
+  ports:
+  - port: 9001 
