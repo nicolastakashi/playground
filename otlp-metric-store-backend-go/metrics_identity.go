@@ -31,6 +31,8 @@ type metadataReplacement struct {
 }
 
 func hash128(value any) [16]byte {
+	// This favors clarity over raw efficiency; if hashing shows up in CPU or allocation profiles,
+	// we should evaluate a more specialized canonicalization and digest path.
 	payload, err := json.Marshal(value)
 	if err != nil {
 		panic(fmt.Sprintf("marshal hash payload: %v", err))
