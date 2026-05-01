@@ -9,6 +9,45 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
+type MetadataKey [16]byte
+
+type ReplacementRank [16]byte
+
+type GaugeMetadataRow struct {
+	MetadataKey           MetadataKey
+	ReplacementRank       ReplacementRank
+	ResourceAttributes    map[string]string
+	ResourceSchemaUrl     string
+	ScopeName             string
+	ScopeVersion          string
+	ScopeAttributes       map[string]string
+	ScopeDroppedAttrCount uint32
+	ScopeSchemaUrl        string
+	ServiceName           string
+	MetricName            string
+	MetricDescription     string
+	MetricUnit            string
+	Attributes            map[string]string
+}
+
+type SumMetadataRow struct {
+	GaugeMetadataRow
+	AggregationTemporality int32
+	IsMonotonic            bool
+}
+
+type GaugeDataPointRow struct {
+	MetadataKey   MetadataKey
+	StartTimeUnix time.Time
+	TimeUnix      time.Time
+	Value         float64
+	Flags         uint32
+}
+
+type SumDataPointRow struct {
+	GaugeDataPointRow
+}
+
 // GaugeRow represents a single gauge data point for ClickHouse insertion.
 type GaugeRow struct {
 	ResourceAttributes    map[string]string
@@ -73,9 +112,11 @@ func NewClickHouseMetricsStore(ctx context.Context, addr string, database string
 	return &ClickHouseMetricsStore{conn: conn}, nil
 }
 
-// CreateTables executes DDL for all 5 metric tables.
+// CreateTables executes DDL for all metric tables.
 func (s *ClickHouseMetricsStore) CreateTables(ctx context.Context) error {
 	ddls := []string{
+		createGaugeMetadataTableSQL,
+		createSumMetadataTableSQL,
 		createGaugeTableSQL,
 		createSumTableSQL,
 		createHistogramTableSQL,
