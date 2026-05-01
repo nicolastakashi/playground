@@ -22,27 +22,28 @@ This repo currently has a single ingest path in `metrics_service.go` that maps O
 
 ## Decisions
 
-### Use a shared metric metadata lookup table
+### Use separate metadata lookup tables for gauge and sum
 
-Gauge and sum datapoints will reference a shared metadata table containing the stable dimensions currently duplicated in every row: resource attributes, scope fields, `service.name`, metric name, metric unit, sum identifying semantics, datapoint attributes, and separate non-identifying descriptive metadata such as `MetricDescription` and schema URLs.
+Gauge datapoints will reference a gauge metadata table, and sum datapoints will reference a sum metadata table. Each table will store the stable dimensions currently duplicated in every row: resource attributes, scope fields, `service.name`, metric name, metric unit, datapoint attributes, and separate non-identifying descriptive metadata such as `MetricDescription` and schema URLs. The sum metadata table will additionally store sum-specific identifying semantics.
 
 Rationale:
 - The duplicated fields describe the identity of a metric series more than the datapoint itself.
-- A shared table avoids repeating the same metadata storage model for gauge and sum.
-- This keeps gauge- and sum-specific measurement fields in their current domain tables while centralizing identity.
+- This preserves the current gauge/sum separation already present in the mapper, store, and datapoint schemas.
+- It avoids introducing sum-only columns or a metric-kind discriminator into gauge metadata rows.
+- It keeps gauge- and sum-specific measurement fields and metadata semantics in their existing domains with a smaller implementation diff.
 
 Alternatives considered:
-- Separate metadata tables per metric kind: rejected because the metadata shape is effectively identical for gauge and sum and would create unnecessary duplication.
+- One shared metadata table for all metric kinds: rejected because gauge and sum no longer share an identical metadata shape once sum-specific semantics are included, and the shared table would add avoidable schema and write-path branching.
 - Keep the current denormalized tables and add secondary lookup tables only for optional queries: rejected because it does not reduce write amplification or satisfy the assignment intent.
 
 ### Use deterministic 128-bit metadata identity generated in the application
 
-The ingest path will compute a deterministic metadata key from a canonical representation of identifying metadata fields only. Canonicalization must sort attribute keys before encoding so logically identical metadata always produces the same key regardless of OTLP attribute ordering. The canonical payload will be hashed with a strong algorithm such as SHA-256 and truncated to 128 bits for storage in a compact binary key column such as `UUID` or `FixedString(16)`. In alignment with OpenTelemetry metric identity guidance, `MetricDescription` and schema URL fields will be stored in the metadata table but excluded from the identity hash, while `MetricUnit` remains identifying.
+The ingest path will compute a deterministic metadata key from a canonical representation of identifying metadata fields only. Canonicalization must sort attribute keys before encoding so logically identical metadata always produces the same key regardless of OTLP attribute ordering. Gauge metadata keys only need the gauge-identifying fields, while sum metadata keys additionally include aggregation temporality and monotonicity. Because gauge and sum use separate metadata tables, metric kind does not need to be encoded into the hash payload itself. The canonical payload will be hashed with a strong algorithm such as SHA-256 and truncated to 128 bits for storage in a compact binary key column such as `UUID` or `FixedString(16)`. In alignment with OpenTelemetry metric identity guidance, `MetricDescription` and schema URL fields will be stored in the metadata table but excluded from the identity hash, while `MetricUnit` remains identifying.
 
 Rationale:
 - Avoids a synchronous read-before-write or central ID allocator during ingest.
 - Supports idempotent metadata reuse across concurrent requests.
-- Naturally handles identity drift: changed identifying attributes or metric semantics yield a new key and a new metadata row.
+- Naturally handles identity drift: changed identifying attributes or sum semantics yield a new key and a new metadata row, while metric kind remains isolated by table selection.
 - Provides a much lower collision risk than `UInt64` while keeping datapoint rows compact for joins and storage.
 - Matches OpenTelemetry community guidance by keeping description and schema metadata out of the identity boundary.
 
@@ -54,7 +55,7 @@ Alternatives considered:
 
 ### Store datapoints as lean fact tables keyed by compact binary metadata identity
 
-Gauge and sum tables will retain only datapoint fields plus the 128-bit metadata key. Gauge rows need metadata key, timestamps, numeric value, and flags. Sum rows additionally need aggregation temporality and monotonicity.
+Gauge and sum tables will retain only datapoint fields plus the 128-bit metadata key that points at the corresponding metadata table. Gauge rows need metadata key, timestamps, numeric value, and flags. Sum rows additionally need aggregation temporality and monotonicity.
 
 Rationale:
 - Removes repeated low-cardinality metadata from the high-volume write path.
@@ -75,19 +76,22 @@ Rationale:
 Alternatives considered:
 - Keep the current order by service name, metric name, and attributes: rejected because those fields move to the metadata table and are no longer present in the datapoint tables.
 
-### Use `ReplacingMergeTree` for eventual metadata deduplication
+### Use `ReplacingMergeTree` with a deterministic replacement rank
 
-The metadata lookup table will use `ReplacingMergeTree` with the deterministic 128-bit metadata key as the logical identity and a versioning signal such as ingest time for replacement semantics. Metadata insertion will remain append-oriented and will not require synchronous existence checks before datapoints are written. Duplicate metadata rows for the same identity are acceptable temporarily and will be collapsed by ClickHouse merges or by deduplicating read patterns when needed.
+The gauge and sum metadata lookup tables will use `ReplacingMergeTree` with the deterministic 128-bit metadata key as the logical identity and a sortable replacement rank derived from a canonical serialization of the non-identifying metadata payload. Metadata insertion will remain append-oriented and will not require synchronous existence checks before datapoints are written. Duplicate metadata rows for the same identity are acceptable temporarily within either table. If those rows disagree on non-identifying metadata, the row with the highest replacement rank is the logical survivor after `FINAL` reads or background merges.
 
 Rationale:
 - Fits ClickHouse's append-oriented model.
 - Keeps ingest logic simple and robust under concurrency.
 - Improves ingestion throughput by avoiding strict uniqueness enforcement on the hot path.
 - Allows datapoint writes to proceed once the metadata key is known, even if physical metadata deduplication has not yet completed.
+- Makes the surviving descriptive metadata row predictable without requiring field-by-field read/merge/write coordination.
 
 Alternatives considered:
 - Plain `MergeTree` with manual cleanup: rejected because it pushes more deduplication burden onto query logic and operational cleanup even though the eventual-consistency goal matches `ReplacingMergeTree` well.
 - Enforcing metadata existence through pre-insert lookups for each row: rejected because it adds read pressure and reduces throughput.
+- Last-write-wins via ingest timestamps: rejected because it couples logical convergence to insert ordering and clock behavior rather than stable content-derived precedence.
+- Longer-description plus last-seen schema merge policy: rejected because `ReplacingMergeTree` replaces whole rows and cannot perform that field-by-field merge without synchronous coordination.
 
 ### Keep datapoint ingestion independent from metadata physical deduplication
 
@@ -103,32 +107,47 @@ Alternatives considered:
 
 ### Treat description and schema URLs as non-identifying metadata
 
-`MetricDescription`, `ResourceSchemaUrl`, and `ScopeSchemaUrl` will be stored in the metadata lookup table but excluded from the identity hash. If two observations share the same identifying metadata but differ only in description, the stored description may be updated using an OTel-compatible policy such as preferring the longer description string. Schema URL differences will be preserved as metadata but will not split time-series identity. Under `ReplacingMergeTree`, the chosen replacement row should encode this merge policy deterministically so eventual merges converge on the intended metadata values.
+`MetricDescription`, `ResourceSchemaUrl`, and `ScopeSchemaUrl` will be stored in the metadata lookup tables but excluded from the identity hash. If two observations share the same identifying metadata but differ only in these descriptive fields, they will reuse the same metadata key within the corresponding metadata table and may temporarily create multiple physical metadata rows. The replacement rank will choose one deterministic logical survivor for that identity without requiring a synchronous read/merge/write step. Preserving a full history of descriptive-field drift is out of scope for this change.
 
 Rationale:
 - OpenTelemetry explicitly treats `description` as non-identifying.
 - Schema URLs describe schema provenance, not the semantic identity of a metric stream.
 - Excluding these fields avoids unnecessary identity churn from documentation or schema evolution changes.
+- A deterministic whole-row winner policy is compatible with append-only `ReplacingMergeTree` inserts.
 
 Alternatives considered:
 - Include description in the identity boundary: rejected because it conflicts with OpenTelemetry guidance and would create unnecessary series splits for documentation-only changes.
 - Include schema URLs in the identity boundary: rejected because schema provenance changes do not redefine the metric stream itself.
+- Preserve every descriptive variant as query-visible history for the same identity: rejected because it complicates the lookup model and is not required for the current assignment.
+
+### Make deduplication verification explicit in tests
+
+Integration tests should validate logical metadata convergence in both metadata tables using deterministic query patterns instead of waiting for background merges opportunistically. Tests may use `SELECT ... FINAL` when asserting the logical survivor for a metadata identity, and may use `OPTIMIZE TABLE ... FINAL` only in cases where the test needs to force a merge before checking physical deduplication behavior.
+
+Rationale:
+- Avoids flaky tests that depend on ClickHouse background merge timing.
+- Matches the logical contract of `ReplacingMergeTree`, where duplicate physical rows can remain temporarily valid.
+- Gives integration tests a precise way to verify both pre-merge validity and post-merge convergence.
+
+Alternatives considered:
+- Sleep-and-poll for background merges: rejected because it is slow and nondeterministic.
 
 ## Risks / Trade-offs
 
-- [Metadata key collisions] -> Use canonical serialization plus a 128-bit hash key, store full metadata alongside the key in the lookup table, and test identical, changed, and pathological collision-handling cases explicitly.
-- [Joins add read complexity] -> Keep the metadata table narrow and stable, and document that queries needing descriptive fields will join on metadata key.
+- [Metadata key collisions] -> Use canonical serialization plus a 128-bit hash key, store full metadata alongside the key in the appropriate metadata table, and test identical, changed, and pathological collision-handling cases explicitly.
+- [Joins add read complexity] -> Keep the metadata tables narrow and stable, and document that queries needing descriptive fields will join on metadata key.
 - [Metadata rows can be re-inserted across batches] -> Use `ReplacingMergeTree` so duplicates are semantically harmless and are eventually compacted without blocking ingestion.
 - [Changing identity fields can increase metadata cardinality] -> Restrict identity to OpenTelemetry-identifying fields and keep descriptive metadata outside the hash boundary.
-- [Non-identifying metadata conflicts can occur] -> Define explicit replacement behavior for description and schema metadata, such as preferring the longer description and last-seen schema URLs, so eventual merges converge predictably.
+- [Non-identifying metadata conflicts can occur] -> Use a content-derived replacement rank over the canonical non-identifying payload so eventual merges converge predictably without synchronous coordination.
 - [Schema migration breaks current tests] -> Update integration tests to assert both metadata persistence and datapoint references instead of denormalized columns on datapoint tables.
+- [Deduplication tests become flaky] -> Use `FINAL` reads and explicit merge forcing only where required instead of waiting on background compaction timing.
 
 ## Migration Plan
 
-1. Add the metadata table using `ReplacingMergeTree` and the new gauge/sum datapoint table definitions.
+1. Add gauge and sum metadata tables using `ReplacingMergeTree` and the new gauge/sum datapoint table definitions.
 2. Introduce metadata row and datapoint row types plus deterministic identity generation over identifying fields only.
 3. Update mapping and store insert paths so metadata is appended with eventual dedup semantics and datapoints reference metadata keys.
-4. Rewrite integration tests to validate schema creation, metadata reuse, eventual metadata dedup semantics, metadata drift, and gRPC-to-ClickHouse end-to-end behavior.
+4. Rewrite integration tests to validate schema creation, metadata reuse, eventual metadata dedup semantics through `FINAL`-based assertions, metadata drift, and gRPC-to-ClickHouse end-to-end behavior.
 5. Keep the scope limited to fresh deployments for this assignment; no historical data migration is required.
 
 Rollback strategy:

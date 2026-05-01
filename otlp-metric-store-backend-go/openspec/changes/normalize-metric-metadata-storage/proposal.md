@@ -4,16 +4,16 @@ The current ingest path stores full metric metadata on every gauge and sum datap
 
 ## What Changes
 
-- Introduce a metadata lookup table that stores normalized metric identity separately from non-identifying descriptive metadata and datapoint rows.
-- Change gauge and sum datapoint storage to reference metadata rows instead of embedding full resource, scope, metric, and attribute metadata inline.
-- Add deterministic metadata identity generation using canonicalized identifying metadata hashed to a compact 128-bit key so the ingest path can reuse metadata rows with negligible collision risk while keeping OpenTelemetry non-identifying fields outside the identity boundary.
-- Use eventual-consistency deduplication for metadata records so ingestion can stay append-oriented and high-throughput without synchronous uniqueness checks.
-- Update ClickHouse schema, ingest logic, and test coverage to validate metadata reuse and correct behavior when metric metadata changes over time.
+- Introduce separate gauge and sum metadata lookup tables that store normalized metric identity separately from non-identifying descriptive metadata and datapoint rows.
+- Change gauge and sum datapoint storage to reference metadata rows in their corresponding lookup tables instead of embedding full resource, scope, metric, and attribute metadata inline.
+- Add deterministic metadata identity generation using canonicalized identifying metadata, with separate gauge and sum key generation and sum-specific semantics included where applicable, hashed to a compact 128-bit key so the ingest path can reuse metadata rows with negligible collision risk while keeping OpenTelemetry non-identifying fields outside the identity boundary.
+- Use append-only metadata inserts with deterministic replacement semantics for non-identifying metadata so ingestion can stay high-throughput without synchronous uniqueness checks while still converging predictably.
+- Update ClickHouse schema, ingest logic, and test coverage to validate metadata reuse, deterministic logical deduplication, and correct behavior when metric metadata changes over time.
 
 ## Capabilities
 
 ### New Capabilities
-- `metric-metadata-lookup`: Store reusable metric metadata separately from datapoints and reference it from gauge and sum records.
+- `metric-metadata-lookup`: Store reusable metric metadata separately from datapoints in per-kind lookup tables and reference it from gauge and sum records.
 
 ### Modified Capabilities
 
@@ -22,4 +22,4 @@ The current ingest path stores full metric metadata on every gauge and sum datap
 - Affected code: `clickhouse_schema.go`, `clickhouse_client.go`, `metrics_mapper.go`, `metrics_service.go`, and integration tests.
 - Affected systems: ClickHouse schema and write path for gauge and sum metrics.
 - API impact: no gRPC API contract changes, but persisted storage layout and query shape change.
-- Operational impact: ingest adds metadata resolution and tests must validate lookup reuse, deduplication behavior, and time-range query alignment.
+- Operational impact: ingest adds metadata resolution and tests must validate lookup reuse, deterministic deduplication behavior, and time-range query alignment.

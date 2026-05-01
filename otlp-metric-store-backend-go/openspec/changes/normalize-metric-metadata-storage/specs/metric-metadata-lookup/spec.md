@@ -1,22 +1,22 @@
 ## ADDED Requirements
 
 ### Requirement: Persist reusable metric metadata separately from datapoints
-The system SHALL persist gauge and sum metric metadata in a dedicated lookup table instead of embedding full metadata inline in every datapoint row. The stored metadata SHALL include the resource, scope, metric, and datapoint attribute fields needed to reconstruct the current denormalized context for a datapoint.
+The system SHALL persist gauge and sum metric metadata in dedicated per-kind lookup tables instead of embedding full metadata inline in every datapoint row. The stored metadata SHALL include the resource, scope, metric, and datapoint attribute fields needed to reconstruct the current denormalized context for a datapoint, and the sum metadata table SHALL additionally store sum-specific semantic fields.
 
 #### Scenario: Gauge datapoint writes metadata and datapoint rows separately
 - **WHEN** the service receives a gauge datapoint with valid resource, scope, metric, and datapoint attributes
-- **THEN** the system MUST persist the metadata in the lookup table and persist the datapoint in the gauge table with a reference to that metadata record
+- **THEN** the system MUST persist the metadata in the gauge metadata table and persist the datapoint in the gauge table with a reference to that metadata record
 
 #### Scenario: Sum datapoint writes metadata and datapoint rows separately
 - **WHEN** the service receives a sum datapoint with valid resource, scope, metric, and datapoint attributes
-- **THEN** the system MUST persist the metadata in the lookup table and persist the datapoint in the sum table with a reference to that metadata record
+- **THEN** the system MUST persist the metadata in the sum metadata table and persist the datapoint in the sum table with a reference to that metadata record
 
 #### Scenario: Metadata writes do not require synchronous uniqueness checks
 - **WHEN** the service receives datapoints whose metadata identity has been seen before
 - **THEN** the system MUST be allowed to append metadata records without a synchronous existence check before writing datapoint references
 
 ### Requirement: Reuse metadata identity for identical metric series
-The system SHALL derive a deterministic 128-bit metadata identity from the normalized identifying metadata fields for a metric series. Logically identical metadata MUST resolve to the same identity even when OTLP attribute ordering differs.
+The system SHALL derive a deterministic 128-bit metadata identity from the normalized identifying metadata fields for a metric series within its corresponding metadata lookup table. Logically identical metadata MUST resolve to the same identity even when OTLP attribute ordering differs.
 
 #### Scenario: Reordered attributes resolve to the same metadata identity
 - **WHEN** two datapoints carry the same metadata values but present resource, scope, or datapoint attributes in different orders
@@ -25,6 +25,10 @@ The system SHALL derive a deterministic 128-bit metadata identity from the norma
 #### Scenario: Repeated series reuse an existing metadata record
 - **WHEN** multiple datapoints in one or more export requests describe the same metric metadata
 - **THEN** the system MUST reference a single logical metadata identity for those datapoints rather than creating a distinct identity per datapoint
+
+#### Scenario: Gauge and sum series do not share a lookup record
+- **WHEN** a gauge datapoint and a sum datapoint share the same resource, scope, metric name, metric unit, and attribute values
+- **THEN** the system MUST persist or reference separate metadata records in the gauge and sum metadata tables rather than sharing one lookup record across kinds
 
 #### Scenario: Metadata identity remains compact without using a 64-bit hash
 - **WHEN** the system persists metadata references for gauge and sum datapoints
@@ -49,8 +53,12 @@ The system SHALL treat a change to any metadata field included in the identifyin
 - **WHEN** a datapoint arrives for the same metric name but with a changed metric unit
 - **THEN** the system MUST preserve that change as a distinct metadata identity
 
+#### Scenario: Sum semantic change creates a new metadata identity
+- **WHEN** a sum datapoint arrives for the same metric name but with changed aggregation temporality or monotonicity
+- **THEN** the system MUST preserve that change as a distinct metadata identity
+
 ### Requirement: Preserve non-identifying metadata outside the identity boundary
-The system SHALL store `MetricDescription` and schema URL fields as descriptive metadata in the lookup table without treating them as identity-defining fields.
+The system SHALL store `MetricDescription` and schema URL fields as descriptive metadata in the lookup tables without treating them as identity-defining fields.
 
 #### Scenario: Description is retained as descriptive metadata
 - **WHEN** a datapoint is persisted with a metric description
@@ -61,7 +69,7 @@ The system SHALL store `MetricDescription` and schema URL fields as descriptive 
 - **THEN** the system MUST store those schema URLs in the metadata lookup record without using them to derive metadata identity
 
 ### Requirement: Metadata deduplication SHALL be eventual and deterministic
-The system SHALL use a metadata storage strategy that tolerates duplicate physical rows for the same metadata identity during ingestion and converges to a single logical metadata record through eventual replacement semantics.
+The system SHALL use metadata storage strategies for the gauge and sum metadata tables that tolerate duplicate physical rows for the same metadata identity during ingestion and converge to a single logical metadata record through eventual replacement semantics.
 
 #### Scenario: Duplicate metadata rows remain logically valid during ingestion
 - **WHEN** multiple metadata rows with the same metadata identity are inserted before ClickHouse merges them
@@ -69,7 +77,7 @@ The system SHALL use a metadata storage strategy that tolerates duplicate physic
 
 #### Scenario: Replacement semantics converge on one logical metadata record
 - **WHEN** duplicate metadata rows exist for the same identity with different non-identifying metadata values
-- **THEN** the system MUST apply a deterministic replacement policy so the surviving logical metadata record is predictable after eventual deduplication
+- **THEN** the system MUST apply a deterministic whole-row replacement policy derived from canonical non-identifying metadata so the surviving logical metadata record is predictable independent of insert order
 
 ### Requirement: Keep datapoint storage optimized for time-bounded queries
 The system SHALL store gauge and sum datapoints in time-partitioned tables that can be queried efficiently for a specified time range without requiring full table scans of all datapoints.
