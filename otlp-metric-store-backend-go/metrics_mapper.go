@@ -67,14 +67,70 @@ func numberDataPointValue(dp *metricspb.NumberDataPoint) float64 {
 	}
 }
 
-// MapGaugeRows converts an ExportMetricsServiceRequest into GaugeRows
-// for all Gauge metrics found in the request.
-func MapGaugeRows(resourceMetrics []*metricspb.ResourceMetrics) []GaugeRow {
-	var rows []GaugeRow
+func newMetricMetadataRow(
+	serviceName string,
+	resourceAttributes map[string]string,
+	resourceSchemaURL string,
+	scope *commonpb.InstrumentationScope,
+	scopeAttributes map[string]string,
+	scopeSchemaURL string,
+	metric *metricspb.Metric,
+	attributes map[string]string,
+) MetricMetadataRow {
+	row := MetricMetadataRow{
+		ResourceAttributes:    resourceAttributes,
+		ResourceSchemaUrl:     resourceSchemaURL,
+		ScopeName:             scope.GetName(),
+		ScopeVersion:          scope.GetVersion(),
+		ScopeAttributes:       scopeAttributes,
+		ScopeDroppedAttrCount: scope.GetDroppedAttributesCount(),
+		ScopeSchemaUrl:        scopeSchemaURL,
+		ServiceName:           serviceName,
+		MetricName:            metric.GetName(),
+		MetricDescription:     metric.GetDescription(),
+		MetricUnit:            metric.GetUnit(),
+		Attributes:            attributes,
+	}
+	row.MetadataKey = gaugeMetadataKey(row)
+	row.ReplacementRank = metadataReplacementRank(row.ResourceSchemaUrl, row.ScopeSchemaUrl, row.MetricDescription)
+	return row
+}
+
+func newSumMetadataRow(
+	serviceName string,
+	resourceAttributes map[string]string,
+	resourceSchemaURL string,
+	scope *commonpb.InstrumentationScope,
+	scopeAttributes map[string]string,
+	scopeSchemaURL string,
+	metric *metricspb.Metric,
+	sum *metricspb.Sum,
+	attributes map[string]string,
+) SumMetadataRow {
+	row := SumMetadataRow{
+		MetricMetadataRow: newMetricMetadataRow(
+			serviceName,
+			resourceAttributes,
+			resourceSchemaURL,
+			scope,
+			scopeAttributes,
+			scopeSchemaURL,
+			metric,
+			attributes,
+		),
+		AggregationTemporality: int32(sum.GetAggregationTemporality()),
+		IsMonotonic:            sum.GetIsMonotonic(),
+	}
+	row.MetadataKey = sumMetadataKey(row)
+	return row
+}
+
+func MapNormalizedGaugeRows(resourceMetrics []*metricspb.ResourceMetrics) NormalizedGaugeRows {
+	rows := NormalizedGaugeRows{}
 	for _, rm := range resourceMetrics {
 		svcName := serviceName(rm.GetResource())
 		resAttrs := kvToMap(rm.GetResource().GetAttributes())
-		resSchemaUrl := rm.GetSchemaUrl()
+		resSchemaURL := rm.GetSchemaUrl()
 
 		for _, sm := range rm.GetScopeMetrics() {
 			scope := sm.GetScope()
@@ -86,23 +142,24 @@ func MapGaugeRows(resourceMetrics []*metricspb.ResourceMetrics) []GaugeRow {
 					continue
 				}
 				for _, dp := range gauge.GetDataPoints() {
-					rows = append(rows, GaugeRow{
-						ResourceAttributes:    resAttrs,
-						ResourceSchemaUrl:     resSchemaUrl,
-						ScopeName:             scope.GetName(),
-						ScopeVersion:          scope.GetVersion(),
-						ScopeAttributes:       scopeAttrs,
-						ScopeDroppedAttrCount: scope.GetDroppedAttributesCount(),
-						ScopeSchemaUrl:        sm.GetSchemaUrl(),
-						ServiceName:           svcName,
-						MetricName:            metric.GetName(),
-						MetricDescription:     metric.GetDescription(),
-						MetricUnit:            metric.GetUnit(),
-						Attributes:            kvToMap(dp.GetAttributes()),
-						StartTimeUnix:         nanosToTime(dp.GetStartTimeUnixNano()),
-						TimeUnix:              nanosToTime(dp.GetTimeUnixNano()),
-						Value:                 numberDataPointValue(dp),
-						Flags:                 dp.GetFlags(),
+					metadata := newMetricMetadataRow(
+						svcName,
+						resAttrs,
+						resSchemaURL,
+						scope,
+						scopeAttrs,
+						sm.GetSchemaUrl(),
+						metric,
+						kvToMap(dp.GetAttributes()),
+					)
+					// We intentionally append duplicate metadata rows within a batch for now; exact intra-batch dedupe can be added later if write volume justifies it.
+					rows.Metadata = append(rows.Metadata, metadata)
+					rows.DataPoints = append(rows.DataPoints, GaugeDataPointRow{
+						MetadataKey:   metadata.MetadataKey,
+						StartTimeUnix: nanosToTime(dp.GetStartTimeUnixNano()),
+						TimeUnix:      nanosToTime(dp.GetTimeUnixNano()),
+						Value:         numberDataPointValue(dp),
+						Flags:         dp.GetFlags(),
 					})
 				}
 			}
@@ -111,14 +168,12 @@ func MapGaugeRows(resourceMetrics []*metricspb.ResourceMetrics) []GaugeRow {
 	return rows
 }
 
-// MapSumRows converts an ExportMetricsServiceRequest into SumRows
-// for all Sum metrics found in the request.
-func MapSumRows(resourceMetrics []*metricspb.ResourceMetrics) []SumRow {
-	var rows []SumRow
+func MapNormalizedSumRows(resourceMetrics []*metricspb.ResourceMetrics) NormalizedSumRows {
+	rows := NormalizedSumRows{}
 	for _, rm := range resourceMetrics {
 		svcName := serviceName(rm.GetResource())
 		resAttrs := kvToMap(rm.GetResource().GetAttributes())
-		resSchemaUrl := rm.GetSchemaUrl()
+		resSchemaURL := rm.GetSchemaUrl()
 
 		for _, sm := range rm.GetScopeMetrics() {
 			scope := sm.GetScope()
@@ -130,31 +185,93 @@ func MapSumRows(resourceMetrics []*metricspb.ResourceMetrics) []SumRow {
 					continue
 				}
 				for _, dp := range sum.GetDataPoints() {
-					rows = append(rows, SumRow{
-						GaugeRow: GaugeRow{
-							ResourceAttributes:    resAttrs,
-							ResourceSchemaUrl:     resSchemaUrl,
-							ScopeName:             scope.GetName(),
-							ScopeVersion:          scope.GetVersion(),
-							ScopeAttributes:       scopeAttrs,
-							ScopeDroppedAttrCount: scope.GetDroppedAttributesCount(),
-							ScopeSchemaUrl:        sm.GetSchemaUrl(),
-							ServiceName:           svcName,
-							MetricName:            metric.GetName(),
-							MetricDescription:     metric.GetDescription(),
-							MetricUnit:            metric.GetUnit(),
-							Attributes:            kvToMap(dp.GetAttributes()),
-							StartTimeUnix:         nanosToTime(dp.GetStartTimeUnixNano()),
-							TimeUnix:              nanosToTime(dp.GetTimeUnixNano()),
-							Value:                 numberDataPointValue(dp),
-							Flags:                 dp.GetFlags(),
+					metadata := newSumMetadataRow(
+						svcName,
+						resAttrs,
+						resSchemaURL,
+						scope,
+						scopeAttrs,
+						sm.GetSchemaUrl(),
+						metric,
+						sum,
+						kvToMap(dp.GetAttributes()),
+					)
+					// We intentionally append duplicate metadata rows within a batch for now; exact intra-batch dedupe can be added later if write volume justifies it.
+					rows.Metadata = append(rows.Metadata, metadata)
+					rows.DataPoints = append(rows.DataPoints, SumDataPointRow{
+						GaugeDataPointRow: GaugeDataPointRow{
+							MetadataKey:   metadata.MetadataKey,
+							StartTimeUnix: nanosToTime(dp.GetStartTimeUnixNano()),
+							TimeUnix:      nanosToTime(dp.GetTimeUnixNano()),
+							Value:         numberDataPointValue(dp),
+							Flags:         dp.GetFlags(),
 						},
-						AggregationTemporality: int32(sum.GetAggregationTemporality()),
-						IsMonotonic:            sum.GetIsMonotonic(),
 					})
 				}
 			}
 		}
+	}
+	return rows
+}
+
+// MapGaugeRows converts an ExportMetricsServiceRequest into GaugeRows
+// for all Gauge metrics found in the request.
+func MapGaugeRows(resourceMetrics []*metricspb.ResourceMetrics) []GaugeRow {
+	normalized := MapNormalizedGaugeRows(resourceMetrics)
+	rows := make([]GaugeRow, 0, len(normalized.DataPoints))
+	for i, dp := range normalized.DataPoints {
+		metadata := normalized.Metadata[i]
+		rows = append(rows, GaugeRow{
+			ResourceAttributes:    metadata.ResourceAttributes,
+			ResourceSchemaUrl:     metadata.ResourceSchemaUrl,
+			ScopeName:             metadata.ScopeName,
+			ScopeVersion:          metadata.ScopeVersion,
+			ScopeAttributes:       metadata.ScopeAttributes,
+			ScopeDroppedAttrCount: metadata.ScopeDroppedAttrCount,
+			ScopeSchemaUrl:        metadata.ScopeSchemaUrl,
+			ServiceName:           metadata.ServiceName,
+			MetricName:            metadata.MetricName,
+			MetricDescription:     metadata.MetricDescription,
+			MetricUnit:            metadata.MetricUnit,
+			Attributes:            metadata.Attributes,
+			StartTimeUnix:         dp.StartTimeUnix,
+			TimeUnix:              dp.TimeUnix,
+			Value:                 dp.Value,
+			Flags:                 dp.Flags,
+		})
+	}
+	return rows
+}
+
+// MapSumRows converts an ExportMetricsServiceRequest into SumRows
+// for all Sum metrics found in the request.
+func MapSumRows(resourceMetrics []*metricspb.ResourceMetrics) []SumRow {
+	normalized := MapNormalizedSumRows(resourceMetrics)
+	rows := make([]SumRow, 0, len(normalized.DataPoints))
+	for i, dp := range normalized.DataPoints {
+		metadata := normalized.Metadata[i]
+		rows = append(rows, SumRow{
+			GaugeRow: GaugeRow{
+				ResourceAttributes:    metadata.ResourceAttributes,
+				ResourceSchemaUrl:     metadata.ResourceSchemaUrl,
+				ScopeName:             metadata.ScopeName,
+				ScopeVersion:          metadata.ScopeVersion,
+				ScopeAttributes:       metadata.ScopeAttributes,
+				ScopeDroppedAttrCount: metadata.ScopeDroppedAttrCount,
+				ScopeSchemaUrl:        metadata.ScopeSchemaUrl,
+				ServiceName:           metadata.ServiceName,
+				MetricName:            metadata.MetricName,
+				MetricDescription:     metadata.MetricDescription,
+				MetricUnit:            metadata.MetricUnit,
+				Attributes:            metadata.Attributes,
+				StartTimeUnix:         dp.StartTimeUnix,
+				TimeUnix:              dp.TimeUnix,
+				Value:                 dp.Value,
+				Flags:                 dp.Flags,
+			},
+			AggregationTemporality: metadata.AggregationTemporality,
+			IsMonotonic:            metadata.IsMonotonic,
+		})
 	}
 	return rows
 }

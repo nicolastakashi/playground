@@ -6,9 +6,9 @@
 
 ## 2. Metadata identity and mapping
 
-- [ ] 2.1 Implement deterministic metadata normalization and 128-bit identity generation over identifying fields only, with separate gauge and sum key generation and sum-specific semantics where applicable, stable across attribute ordering.
-- [ ] 2.2 Refactor metric mapping so gauge and sum datapoints produce normalized metadata plus datapoint rows instead of fully denormalized rows.
-- [ ] 2.3 Ensure identifying metadata changes produce a new identity while description and schema URL changes reuse the same identity and rely on deterministic replacement-rank semantics for eventual convergence.
+- [x] 2.1 Implement deterministic metadata normalization and 128-bit identity generation over identifying fields only, with separate gauge and sum key generation and sum-specific semantics where applicable, stable across attribute ordering.
+- [x] 2.2 Refactor metric mapping so gauge and sum datapoints produce normalized metadata plus datapoint rows instead of fully denormalized rows.
+- [x] 2.3 Ensure identifying metadata changes produce a new identity while description and schema URL changes reuse the same identity and rely on deterministic replacement-rank semantics for eventual convergence.
 
 ## 3. Store write path
 
