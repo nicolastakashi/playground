@@ -1,8 +1,8 @@
 ## 1. Schema and row model
 
-- [ ] 1.1 Add separate ClickHouse gauge and sum metadata lookup table schemas using `ReplacingMergeTree`, each with a compact 128-bit metadata key column, a deterministic replacement-rank/version field for non-identifying metadata, and separate non-identifying fields for description and schema URLs.
-- [ ] 1.2 Replace denormalized gauge and sum table schemas with datapoint-focused schemas that store the 128-bit metadata reference to the corresponding metadata table plus measurement fields.
-- [ ] 1.3 Introduce Go row types for gauge metadata, sum metadata, and normalized gauge and sum datapoint records.
+- [x] 1.1 Add separate ClickHouse gauge and sum metadata lookup table schemas using `ReplacingMergeTree`, each with a compact 128-bit metadata key column, a deterministic replacement-rank/version field for non-identifying metadata, and separate non-identifying fields for description and schema URLs.
+- [x] 1.2 Replace denormalized gauge and sum table schemas with datapoint-focused schemas that store the 128-bit metadata reference to the corresponding metadata table plus measurement fields.
+- [x] 1.3 Introduce Go row types for gauge metadata, sum metadata, and normalized gauge and sum datapoint records.
 
 ## 2. Metadata identity and mapping
 
