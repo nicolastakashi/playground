@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+
+	"github.com/google/uuid"
 )
 
 type metricMetadataIdentity struct {
@@ -45,6 +47,10 @@ func hash128(value any) [16]byte {
 	return truncated
 }
 
+func hashUUID(value any) uuid.UUID {
+	return uuid.UUID(hash128(value))
+}
+
 func metricMetadataIdentityPayload(row MetricMetadataRow) metricMetadataIdentity {
 	return metricMetadataIdentity{
 		ResourceAttributes:    row.ResourceAttributes,
@@ -60,15 +66,15 @@ func metricMetadataIdentityPayload(row MetricMetadataRow) metricMetadataIdentity
 }
 
 func gaugeMetadataKey(row MetricMetadataRow) MetadataKey {
-	return MetadataKey(hash128(metricMetadataIdentityPayload(row)))
+	return hashUUID(metricMetadataIdentityPayload(row))
 }
 
 func sumMetadataKey(row SumMetadataRow) MetadataKey {
-	return MetadataKey(hash128(sumMetadataIdentity{
+	return hashUUID(sumMetadataIdentity{
 		MetricMetadataIdentity: metricMetadataIdentityPayload(row.MetricMetadataRow),
 		AggregationTemporality: row.AggregationTemporality,
 		IsMonotonic:            row.IsMonotonic,
-	}))
+	})
 }
 
 func metadataReplacementRank(resourceSchemaURL string, scopeSchemaURL string, metricDescription string) ReplacementRank {

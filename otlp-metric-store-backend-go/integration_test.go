@@ -74,6 +74,8 @@ func TestCreateTables(t *testing.T) {
 	}
 
 	expectedTables := []string{
+		"otel_metrics_gauge_metadata",
+		"otel_metrics_sum_metadata",
 		"otel_metrics_gauge",
 		"otel_metrics_sum",
 		"otel_metrics_histogram",
@@ -145,9 +147,12 @@ func TestInsertGauge(t *testing.T) {
 		},
 	}
 
-	rows := MapGaugeRows(resourceMetrics)
-	if err := store.InsertGauge(ctx, rows); err != nil {
-		t.Fatalf("inserting gauge rows: %v", err)
+	rows := MapNormalizedGaugeRows(resourceMetrics)
+	if err := store.InsertGaugeMetadata(ctx, rows.Metadata); err != nil {
+		t.Fatalf("inserting gauge metadata rows: %v", err)
+	}
+	if err := store.InsertGaugeDataPoints(ctx, rows.DataPoints); err != nil {
+		t.Fatalf("inserting gauge datapoint rows: %v", err)
 	}
 
 	var (
@@ -156,7 +161,7 @@ func TestInsertGauge(t *testing.T) {
 		value       float64
 	)
 	err := store.conn.QueryRow(ctx,
-		"SELECT ServiceName, MetricName, Value FROM otel_metrics_gauge WHERE MetricName = 'cpu.utilization'",
+		"SELECT m.ServiceName, m.MetricName, g.Value FROM otel_metrics_gauge g INNER JOIN otel_metrics_gauge_metadata m USING (MetadataKey) WHERE m.MetricName = 'cpu.utilization'",
 	).Scan(&serviceName, &metricName, &value)
 	if err != nil {
 		t.Fatalf("querying gauge: %v", err)
@@ -228,9 +233,12 @@ func TestInsertSum(t *testing.T) {
 		},
 	}
 
-	rows := MapSumRows(resourceMetrics)
-	if err := store.InsertSum(ctx, rows); err != nil {
-		t.Fatalf("inserting sum rows: %v", err)
+	rows := MapNormalizedSumRows(resourceMetrics)
+	if err := store.InsertSumMetadata(ctx, rows.Metadata); err != nil {
+		t.Fatalf("inserting sum metadata rows: %v", err)
+	}
+	if err := store.InsertSumDataPoints(ctx, rows.DataPoints); err != nil {
+		t.Fatalf("inserting sum datapoint rows: %v", err)
 	}
 
 	var (
@@ -241,7 +249,7 @@ func TestInsertSum(t *testing.T) {
 		isMonotonic            bool
 	)
 	err := store.conn.QueryRow(ctx,
-		"SELECT ServiceName, MetricName, Value, AggregationTemporality, IsMonotonic FROM otel_metrics_sum WHERE MetricName = 'http.requests.total'",
+		"SELECT m.ServiceName, m.MetricName, s.Value, m.AggregationTemporality, m.IsMonotonic FROM otel_metrics_sum s INNER JOIN otel_metrics_sum_metadata m USING (MetadataKey) WHERE m.MetricName = 'http.requests.total'",
 	).Scan(&serviceName, &metricName, &value, &aggregationTemporality, &isMonotonic)
 	if err != nil {
 		t.Fatalf("querying sum: %v", err)
@@ -341,7 +349,7 @@ func TestGRPCToClickHouse(t *testing.T) {
 		value      float64
 	)
 	err = store.conn.QueryRow(ctx,
-		"SELECT ServiceName, MetricName, Value FROM otel_metrics_gauge WHERE MetricName = 'e2e.gauge'",
+		"SELECT m.ServiceName, m.MetricName, g.Value FROM otel_metrics_gauge g INNER JOIN otel_metrics_gauge_metadata m USING (MetadataKey) WHERE m.MetricName = 'e2e.gauge'",
 	).Scan(&svcName, &metricName, &value)
 	if err != nil {
 		t.Fatalf("querying clickhouse: %v", err)

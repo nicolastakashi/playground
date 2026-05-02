@@ -25,13 +25,19 @@ func (m *dash0MetricsServiceServer) Export(ctx context.Context, request *colmetr
 	if m.store != nil {
 		rm := request.GetResourceMetrics()
 
-		if gaugeRows := MapGaugeRows(rm); len(gaugeRows) > 0 {
-			if err := m.store.InsertGauge(ctx, gaugeRows); err != nil {
+		if gaugeRows := MapNormalizedGaugeRows(rm); len(gaugeRows.DataPoints) > 0 {
+			if err := m.store.InsertGaugeMetadata(ctx, gaugeRows.Metadata); err != nil {
+				return nil, err
+			}
+			if err := m.store.InsertGaugeDataPoints(ctx, gaugeRows.DataPoints); err != nil {
 				return nil, err
 			}
 		}
-		if sumRows := MapSumRows(rm); len(sumRows) > 0 {
-			if err := m.store.InsertSum(ctx, sumRows); err != nil {
+		if sumRows := MapNormalizedSumRows(rm); len(sumRows.DataPoints) > 0 {
+			if err := m.store.InsertSumMetadata(ctx, sumRows.Metadata); err != nil {
+				return nil, err
+			}
+			if err := m.store.InsertSumDataPoints(ctx, sumRows.DataPoints); err != nil {
 				return nil, err
 			}
 		}
