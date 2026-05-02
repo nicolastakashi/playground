@@ -1,8 +1,12 @@
 package main
 
-import "time"
+import (
+	"time"
 
-type MetadataKey [16]byte
+	"github.com/google/uuid"
+)
+
+type MetadataKey = uuid.UUID
 
 type ReplacementRank [16]byte
 
@@ -49,29 +53,4 @@ type NormalizedGaugeRows struct {
 type NormalizedSumRows struct {
 	Metadata   []SumMetadataRow
 	DataPoints []SumDataPointRow
-}
-
-type GaugeRow struct {
-	ResourceAttributes    map[string]string
-	ResourceSchemaUrl     string
-	ScopeName             string
-	ScopeVersion          string
-	ScopeAttributes       map[string]string
-	ScopeDroppedAttrCount uint32
-	ScopeSchemaUrl        string
-	ServiceName           string
-	MetricName            string
-	MetricDescription     string
-	MetricUnit            string
-	Attributes            map[string]string
-	StartTimeUnix         time.Time
-	TimeUnix              time.Time
-	Value                 float64
-	Flags                 uint32
-}
-
-type SumRow struct {
-	GaugeRow
-	AggregationTemporality int32
-	IsMonotonic            bool
 }

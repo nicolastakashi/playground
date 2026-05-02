@@ -12,9 +12,9 @@
 
 ## 3. Store write path
 
-- [ ] 3.1 Extend the `MetricsStore` interface and ClickHouse store implementation to insert gauge metadata and sum metadata records.
-- [ ] 3.2 Update gauge and sum insert paths to append metadata rows without synchronous uniqueness checks before sending datapoint rows with metadata references.
-- [ ] 3.3 Refactor the gRPC export flow to use the normalized write path for both gauge and sum metrics and apply the deterministic replacement-rank policy for non-identifying metadata conflicts.
+- [x] 3.1 Extend the `MetricsStore` interface and ClickHouse store implementation to insert gauge metadata and sum metadata records.
+- [x] 3.2 Update gauge and sum insert paths to append metadata rows without synchronous uniqueness checks before sending datapoint rows with metadata references.
+- [x] 3.3 Refactor the gRPC export flow to use the normalized write path for both gauge and sum metrics and apply the deterministic replacement-rank policy for non-identifying metadata conflicts.
 
 ## 4. Validation
 
