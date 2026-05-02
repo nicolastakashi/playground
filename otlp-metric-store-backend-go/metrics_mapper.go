@@ -9,6 +9,11 @@ import (
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 )
 
+type metadataVersionKey struct {
+	MetadataKey     MetadataKey
+	ReplacementRank ReplacementRank
+}
+
 // serviceName extracts the service.name from resource attributes, returning "" if not found.
 func serviceName(resource *resourcepb.Resource) string {
 	if resource == nil {
@@ -127,6 +132,7 @@ func newSumMetadataRow(
 
 func MapNormalizedGaugeRows(resourceMetrics []*metricspb.ResourceMetrics) NormalizedGaugeRows {
 	rows := NormalizedGaugeRows{}
+	seenMetadata := make(map[metadataVersionKey]struct{})
 	for _, rm := range resourceMetrics {
 		svcName := serviceName(rm.GetResource())
 		resAttrs := kvToMap(rm.GetResource().GetAttributes())
@@ -152,8 +158,11 @@ func MapNormalizedGaugeRows(resourceMetrics []*metricspb.ResourceMetrics) Normal
 						metric,
 						kvToMap(dp.GetAttributes()),
 					)
-					// We intentionally append duplicate metadata rows within a batch for now; exact intra-batch dedupe can be added later if write volume justifies it.
-					rows.Metadata = append(rows.Metadata, metadata)
+					metadataKey := metadataVersionKey{MetadataKey: metadata.MetadataKey, ReplacementRank: metadata.ReplacementRank}
+					if _, ok := seenMetadata[metadataKey]; !ok {
+						rows.Metadata = append(rows.Metadata, metadata)
+						seenMetadata[metadataKey] = struct{}{}
+					}
 					rows.DataPoints = append(rows.DataPoints, GaugeDataPointRow{
 						MetadataKey:   metadata.MetadataKey,
 						StartTimeUnix: nanosToTime(dp.GetStartTimeUnixNano()),
@@ -170,6 +179,7 @@ func MapNormalizedGaugeRows(resourceMetrics []*metricspb.ResourceMetrics) Normal
 
 func MapNormalizedSumRows(resourceMetrics []*metricspb.ResourceMetrics) NormalizedSumRows {
 	rows := NormalizedSumRows{}
+	seenMetadata := make(map[metadataVersionKey]struct{})
 	for _, rm := range resourceMetrics {
 		svcName := serviceName(rm.GetResource())
 		resAttrs := kvToMap(rm.GetResource().GetAttributes())
@@ -196,8 +206,11 @@ func MapNormalizedSumRows(resourceMetrics []*metricspb.ResourceMetrics) Normaliz
 						sum,
 						kvToMap(dp.GetAttributes()),
 					)
-					// We intentionally append duplicate metadata rows within a batch for now; exact intra-batch dedupe can be added later if write volume justifies it.
-					rows.Metadata = append(rows.Metadata, metadata)
+					metadataKey := metadataVersionKey{MetadataKey: metadata.MetadataKey, ReplacementRank: metadata.ReplacementRank}
+					if _, ok := seenMetadata[metadataKey]; !ok {
+						rows.Metadata = append(rows.Metadata, metadata)
+						seenMetadata[metadataKey] = struct{}{}
+					}
 					rows.DataPoints = append(rows.DataPoints, SumDataPointRow{
 						GaugeDataPointRow: GaugeDataPointRow{
 							MetadataKey:   metadata.MetadataKey,

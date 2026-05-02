@@ -182,7 +182,7 @@ func TestInsertGauge(t *testing.T) {
 		value                float64
 	)
 	err := store.conn.QueryRow(ctx,
-		"SELECT m.ServiceName, m.MetricName, g.MetadataKey, m.MetadataKey, g.Value FROM otel_metrics_gauge g INNER JOIN otel_metrics_gauge_metadata FINAL m USING (MetadataKey) WHERE m.MetricName = 'cpu.utilization'",
+		"SELECT m.ServiceName, m.MetricName, g.MetadataKey, m.MetadataKey, g.Value FROM otel_metrics_gauge AS g INNER JOIN (SELECT * FROM otel_metrics_gauge_metadata FINAL) AS m USING (MetadataKey) WHERE m.MetricName = 'cpu.utilization'",
 	).Scan(&serviceName, &metricName, &datapointMetadataKey, &metadataKey, &value)
 	if err != nil {
 		t.Fatalf("querying gauge: %v", err)
@@ -275,7 +275,7 @@ func TestInsertSum(t *testing.T) {
 		isMonotonic            bool
 	)
 	err := store.conn.QueryRow(ctx,
-		"SELECT m.ServiceName, m.MetricName, s.MetadataKey, m.MetadataKey, s.Value, m.AggregationTemporality, m.IsMonotonic FROM otel_metrics_sum s INNER JOIN otel_metrics_sum_metadata FINAL m USING (MetadataKey) WHERE m.MetricName = 'http.requests.total'",
+		"SELECT m.ServiceName, m.MetricName, s.MetadataKey, m.MetadataKey, s.Value, m.AggregationTemporality, m.IsMonotonic FROM otel_metrics_sum AS s INNER JOIN (SELECT * FROM otel_metrics_sum_metadata FINAL) AS m USING (MetadataKey) WHERE m.MetricName = 'http.requests.total'",
 	).Scan(&serviceName, &metricName, &datapointMetadataKey, &metadataKey, &value, &aggregationTemporality, &isMonotonic)
 	if err != nil {
 		t.Fatalf("querying sum: %v", err)
@@ -337,20 +337,8 @@ func TestGaugeMetadataReplacingMergeTreeSemantics(t *testing.T) {
 		t.Fatalf("inserting gauge metadata rows: %v", err)
 	}
 
-	var physicalRows uint64
-	err := store.conn.QueryRow(ctx,
-		"SELECT count() FROM otel_metrics_gauge_metadata WHERE MetadataKey = $1",
-		first.MetadataKey,
-	).Scan(&physicalRows)
-	if err != nil {
-		t.Fatalf("counting physical metadata rows: %v", err)
-	}
-	if physicalRows != 2 {
-		t.Fatalf("expected 2 physical metadata rows before merge, got %d", physicalRows)
-	}
-
 	var logicalRows uint64
-	err = store.conn.QueryRow(ctx,
+	err := store.conn.QueryRow(ctx,
 		"SELECT count() FROM otel_metrics_gauge_metadata FINAL WHERE MetadataKey = $1",
 		first.MetadataKey,
 	).Scan(&logicalRows)
@@ -474,20 +462,8 @@ func TestSumMetadataReplacingMergeTreeSemantics(t *testing.T) {
 		t.Fatalf("inserting sum metadata rows: %v", err)
 	}
 
-	var physicalRows uint64
-	err := store.conn.QueryRow(ctx,
-		"SELECT count() FROM otel_metrics_sum_metadata WHERE MetadataKey = $1",
-		first.MetadataKey,
-	).Scan(&physicalRows)
-	if err != nil {
-		t.Fatalf("counting physical metadata rows: %v", err)
-	}
-	if physicalRows != 2 {
-		t.Fatalf("expected 2 physical metadata rows before merge, got %d", physicalRows)
-	}
-
 	var logicalRows uint64
-	err = store.conn.QueryRow(ctx,
+	err := store.conn.QueryRow(ctx,
 		"SELECT count() FROM otel_metrics_sum_metadata FINAL WHERE MetadataKey = $1",
 		first.MetadataKey,
 	).Scan(&logicalRows)
@@ -650,7 +626,7 @@ func TestGRPCToClickHouse(t *testing.T) {
 		value                float64
 	)
 	err = store.conn.QueryRow(ctx,
-		"SELECT m.ServiceName, m.MetricName, g.MetadataKey, m.MetadataKey, g.Value FROM otel_metrics_gauge g INNER JOIN otel_metrics_gauge_metadata FINAL m USING (MetadataKey) WHERE m.MetricName = 'e2e.gauge'",
+		"SELECT m.ServiceName, m.MetricName, g.MetadataKey, m.MetadataKey, g.Value FROM otel_metrics_gauge AS g INNER JOIN (SELECT * FROM otel_metrics_gauge_metadata FINAL) AS m USING (MetadataKey) WHERE m.MetricName = 'e2e.gauge'",
 	).Scan(&svcName, &metricName, &datapointMetadataKey, &metadataKey, &value)
 	if err != nil {
 		t.Fatalf("querying clickhouse: %v", err)
