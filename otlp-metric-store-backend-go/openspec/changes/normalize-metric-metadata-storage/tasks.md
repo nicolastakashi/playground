@@ -18,6 +18,6 @@
 
 ## 4. Validation
 
-- [ ] 4.1 Add unit tests for metadata normalization and 128-bit identity generation, including reordered-attribute, gauge-vs-sum table separation, sum-semantic-change, unit-change, description-change, and schema-URL-change cases.
-- [ ] 4.2 Update integration tests to verify both metadata tables are created, `ReplacingMergeTree` semantics, identifying metadata drift, non-identifying metadata handling, and normalized gauge and sum inserts using `FINAL` or explicit merge forcing instead of background-merge timing.
-- [ ] 4.3 Update the gRPC-to-ClickHouse integration test to assert datapoint rows reference persisted metadata correctly.
+- [x] 4.1 Add unit tests for metadata normalization and 128-bit identity generation, including reordered-attribute, gauge-vs-sum table separation, sum-semantic-change, unit-change, description-change, and schema-URL-change cases.
+- [x] 4.2 Update integration tests to verify both metadata tables are created, `ReplacingMergeTree` semantics, identifying metadata drift, non-identifying metadata handling, and normalized gauge and sum inserts using `FINAL` or explicit merge forcing instead of background-merge timing.
+- [x] 4.3 Update the gRPC-to-ClickHouse integration test to assert datapoint rows reference persisted metadata correctly.
