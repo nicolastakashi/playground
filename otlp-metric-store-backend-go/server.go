@@ -11,7 +11,6 @@ import (
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/metric"
 	colmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -29,20 +28,9 @@ var (
 const name = "dash0.com/otlp-log-processor-backend"
 
 var (
-	meter                  = otel.Meter(name)
-	logger                 = otelslog.NewLogger(name)
-	metricsReceivedCounter metric.Int64Counter
+	meter  = otel.Meter(name)
+	logger = otelslog.NewLogger(name)
 )
-
-func init() {
-	var err error
-	metricsReceivedCounter, err = meter.Int64Counter("com.dash0.homeexercise.metrics.received",
-		metric.WithDescription("The number of metrics received by otlp-metrics-processor-backend"),
-		metric.WithUnit("{metric}"))
-	if err != nil {
-		panic(err)
-	}
-}
 
 func main() {
 	if err := run(); err != nil {
@@ -57,6 +45,7 @@ func run() (err error) {
 	// Set up OpenTelemetry.
 	otelShutdown, err := setupOTelSDK(context.Background())
 	if err != nil {
+		slog.Error("Failed to initialize OpenTelemetry SDK", slog.Any("com.dash0.error", err))
 		return
 	}
 
@@ -66,20 +55,30 @@ func run() (err error) {
 	}()
 
 	flag.Parse()
+	slog.Info("Configuration loaded",
+		slog.String("com.dash0.listen_addr", *listenAddr),
+		slog.Int("com.dash0.max_receive_message_size", *maxReceiveMessageSize),
+		slog.String("com.dash0.clickhouse_addr", *clickhouseAddr),
+	)
 
 	store, err := setupMetricsStore(context.Background())
 	if err != nil {
+		slog.Error("Failed to initialize metrics store", slog.Any("com.dash0.error", err))
 		return err
 	}
 	if store != nil {
+		slog.Info("Metrics store initialized", slog.String("com.dash0.clickhouse_addr", *clickhouseAddr), slog.String("com.dash0.clickhouse_database", *clickhouseDatabase))
 		defer func() {
 			err = errors.Join(err, store.Close())
 		}()
+	} else {
+		slog.Info("Metrics store disabled")
 	}
 
-	slog.Debug("Starting listener", slog.String("listenAddr", *listenAddr))
+	slog.Debug("Starting listener", slog.String("com.dash0.listen_addr", *listenAddr))
 	listener, err := net.Listen("tcp", *listenAddr)
 	if err != nil {
+		slog.Error("Failed to start listener", slog.String("com.dash0.listen_addr", *listenAddr), slog.Any("com.dash0.error", err))
 		return err
 	}
 
@@ -100,6 +99,7 @@ func setupMetricsStore(ctx context.Context) (MetricsStore, error) {
 		return nil, nil
 	}
 
+	slog.Info("Connecting to ClickHouse", slog.String("com.dash0.clickhouse_addr", *clickhouseAddr), slog.String("com.dash0.clickhouse_database", *clickhouseDatabase))
 	store, err := NewClickHouseMetricsStore(ctx, *clickhouseAddr, *clickhouseDatabase, *clickhouseUsername, *clickhousePassword)
 	if err != nil {
 		return nil, err

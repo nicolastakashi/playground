@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutlog"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
@@ -15,7 +16,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.39.0"
 )
 
 var res = resource.NewWithAttributes(
@@ -23,6 +24,7 @@ var res = resource.NewWithAttributes(
 	semconv.ServiceNameKey.String("otlp-metrics-processor-backend"),
 	semconv.ServiceNamespaceKey.String("dash0-exercise"),
 	semconv.ServiceVersionKey.String("1.0.0"),
+	semconv.ServiceInstanceIDKey.String(uuid.NewString()),
 )
 
 // setupOTelSDK bootstraps the OpenTelemetry pipeline.
