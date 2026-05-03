@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"sync"
 
 	colmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 )
@@ -24,20 +25,40 @@ func (m *dash0MetricsServiceServer) Export(ctx context.Context, request *colmetr
 
 	if m.store != nil {
 		rm := request.GetResourceMetrics()
+		gaugeRows := MapNormalizedGaugeRows(rm)
+		sumRows := MapNormalizedSumRows(rm)
 
-		if gaugeRows := MapNormalizedGaugeRows(rm); len(gaugeRows.DataPoints) > 0 {
-			if err := m.store.InsertGaugeMetadata(ctx, gaugeRows.Metadata); err != nil {
-				return nil, err
-			}
-			if err := m.store.InsertGaugeDataPoints(ctx, gaugeRows.DataPoints); err != nil {
-				return nil, err
-			}
+		var wg sync.WaitGroup
+		errCh := make(chan error, 2)
+
+		if len(gaugeRows.DataPoints) > 0 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := m.store.InsertGaugeMetadata(ctx, gaugeRows.Metadata); err != nil {
+					errCh <- err
+					return
+				}
+				errCh <- m.store.InsertGaugeDataPoints(ctx, gaugeRows.DataPoints)
+			}()
 		}
-		if sumRows := MapNormalizedSumRows(rm); len(sumRows.DataPoints) > 0 {
-			if err := m.store.InsertSumMetadata(ctx, sumRows.Metadata); err != nil {
-				return nil, err
-			}
-			if err := m.store.InsertSumDataPoints(ctx, sumRows.DataPoints); err != nil {
+		if len(sumRows.DataPoints) > 0 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := m.store.InsertSumMetadata(ctx, sumRows.Metadata); err != nil {
+					errCh <- err
+					return
+				}
+				errCh <- m.store.InsertSumDataPoints(ctx, sumRows.DataPoints)
+			}()
+		}
+
+		wg.Wait()
+		close(errCh)
+
+		for err := range errCh {
+			if err != nil {
 				return nil, err
 			}
 		}
