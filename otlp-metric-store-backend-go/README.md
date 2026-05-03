@@ -43,6 +43,34 @@ make test
 make test-integration
 ```
 
+## Observability
+
+The service keeps the existing stdout-based OpenTelemetry exporters for traces, metrics, and logs. This repository does not configure an external OTLP collector or backend.
+
+### Application metrics
+
+The service emits these application metrics in addition to the gRPC middleware telemetry:
+
+- `com.dash0.homeexercise.metrics.received`: count of OTLP export requests received
+- `com.dash0.homeexercise.metrics.exports`: count of completed export requests with a `com.dash0.outcome` attribute
+- `com.dash0.homeexercise.metrics.datapoints`: count of processed datapoints with a `com.dash0.metric.kind` attribute
+- `com.dash0.homeexercise.metrics.export.duration`: export request latency with a `com.dash0.outcome` attribute
+- `com.dash0.homeexercise.metrics.store.rows`: count of rows written to ClickHouse with `com.dash0.metric.kind` and `com.dash0.storage.operation` attributes
+- `com.dash0.homeexercise.metrics.store.failures`: count of ClickHouse write failures with `com.dash0.metric.kind` and `com.dash0.storage.operation` attributes
+- `com.dash0.homeexercise.metrics.store.duration`: ClickHouse write latency with `com.dash0.metric.kind`, `com.dash0.storage.operation`, and `com.dash0.outcome` attributes
+
+### Traces and logs
+
+- Export requests create an application span named `metrics.export`
+- ClickHouse writes create child spans named `clickhouse.<metric-kind>.<operation>`
+- Export request logs include aggregate metadata row and datapoint counts
+- ClickHouse failure logs identify the metric kind, storage operation, row count, and error
+- Startup logs make OpenTelemetry initialization, ClickHouse connection attempts, and listener failures explicit
+
+### Follow-up guidance
+
+Weaver adoption, observability by design, and CI-based observability contract testing are not implemented in this repository change. They are documented as recommended follow-up work once the service's emitted signals stabilize.
+
 ## Storage Model
 
 - `otel_metrics_gauge_metadata` and `otel_metrics_sum_metadata` store metric identity and descriptive metadata.
