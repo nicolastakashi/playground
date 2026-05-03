@@ -177,15 +177,27 @@ func TestInsertGauge(t *testing.T) {
 	var (
 		serviceName          string
 		metricName           string
-		datapointMetadataKey MetadataKey
 		metadataKey          MetadataKey
+		datapointMetadataKey MetadataKey
 		value                float64
 	)
 	err := store.conn.QueryRow(ctx,
-		"SELECT m.ServiceName, m.MetricName, g.MetadataKey, m.MetadataKey, g.Value FROM otel_metrics_gauge AS g INNER JOIN (SELECT * FROM otel_metrics_gauge_metadata FINAL) AS m USING (MetadataKey) WHERE m.MetricName = 'cpu.utilization'",
-	).Scan(&serviceName, &metricName, &datapointMetadataKey, &metadataKey, &value)
+		"SELECT MetadataKey, ServiceName, MetricName FROM otel_metrics_gauge_metadata FINAL WHERE MetricName = $1 AND ServiceName = $2",
+		"cpu.utilization",
+		"test-service",
+	).Scan(&metadataKey, &serviceName, &metricName)
 	if err != nil {
-		t.Fatalf("querying gauge: %v", err)
+		t.Fatalf("querying gauge metadata: %v", err)
+	}
+
+	err = store.conn.QueryRow(ctx,
+		"SELECT MetadataKey, Value FROM otel_metrics_gauge WHERE MetadataKey = $1 AND TimeUnix >= fromUnixTimestamp64Nano($2) AND TimeUnix <= fromUnixTimestamp64Nano($3)",
+		metadataKey,
+		int64(startTime),
+		int64(now),
+	).Scan(&datapointMetadataKey, &value)
+	if err != nil {
+		t.Fatalf("querying gauge datapoints: %v", err)
 	}
 
 	if serviceName != "test-service" {
@@ -268,17 +280,29 @@ func TestInsertSum(t *testing.T) {
 	var (
 		serviceName            string
 		metricName             string
-		datapointMetadataKey   MetadataKey
 		metadataKey            MetadataKey
+		datapointMetadataKey   MetadataKey
 		value                  float64
 		aggregationTemporality int32
 		isMonotonic            bool
 	)
 	err := store.conn.QueryRow(ctx,
-		"SELECT m.ServiceName, m.MetricName, s.MetadataKey, m.MetadataKey, s.Value, m.AggregationTemporality, m.IsMonotonic FROM otel_metrics_sum AS s INNER JOIN (SELECT * FROM otel_metrics_sum_metadata FINAL) AS m USING (MetadataKey) WHERE m.MetricName = 'http.requests.total'",
-	).Scan(&serviceName, &metricName, &datapointMetadataKey, &metadataKey, &value, &aggregationTemporality, &isMonotonic)
+		"SELECT MetadataKey, ServiceName, MetricName, AggregationTemporality, IsMonotonic FROM otel_metrics_sum_metadata FINAL WHERE MetricName = $1 AND ServiceName = $2",
+		"http.requests.total",
+		"test-service",
+	).Scan(&metadataKey, &serviceName, &metricName, &aggregationTemporality, &isMonotonic)
 	if err != nil {
-		t.Fatalf("querying sum: %v", err)
+		t.Fatalf("querying sum metadata: %v", err)
+	}
+
+	err = store.conn.QueryRow(ctx,
+		"SELECT MetadataKey, Value FROM otel_metrics_sum WHERE MetadataKey = $1 AND TimeUnix >= fromUnixTimestamp64Nano($2) AND TimeUnix <= fromUnixTimestamp64Nano($3)",
+		metadataKey,
+		int64(startTime),
+		int64(now),
+	).Scan(&datapointMetadataKey, &value)
+	if err != nil {
+		t.Fatalf("querying sum datapoints: %v", err)
 	}
 
 	if serviceName != "test-service" {
@@ -621,15 +645,27 @@ func TestGRPCToClickHouse(t *testing.T) {
 	var (
 		svcName              string
 		metricName           string
-		datapointMetadataKey MetadataKey
 		metadataKey          MetadataKey
+		datapointMetadataKey MetadataKey
 		value                float64
 	)
 	err = store.conn.QueryRow(ctx,
-		"SELECT m.ServiceName, m.MetricName, g.MetadataKey, m.MetadataKey, g.Value FROM otel_metrics_gauge AS g INNER JOIN (SELECT * FROM otel_metrics_gauge_metadata FINAL) AS m USING (MetadataKey) WHERE m.MetricName = 'e2e.gauge'",
-	).Scan(&svcName, &metricName, &datapointMetadataKey, &metadataKey, &value)
+		"SELECT MetadataKey, ServiceName, MetricName FROM otel_metrics_gauge_metadata FINAL WHERE MetricName = $1 AND ServiceName = $2",
+		"e2e.gauge",
+		"e2e-service",
+	).Scan(&metadataKey, &svcName, &metricName)
 	if err != nil {
-		t.Fatalf("querying clickhouse: %v", err)
+		t.Fatalf("querying clickhouse metadata: %v", err)
+	}
+
+	err = store.conn.QueryRow(ctx,
+		"SELECT MetadataKey, Value FROM otel_metrics_gauge WHERE MetadataKey = $1 AND TimeUnix >= fromUnixTimestamp64Nano($2) AND TimeUnix <= fromUnixTimestamp64Nano($3)",
+		metadataKey,
+		int64(now-uint64(time.Second)),
+		int64(now+uint64(time.Second)),
+	).Scan(&datapointMetadataKey, &value)
+	if err != nil {
+		t.Fatalf("querying clickhouse datapoints: %v", err)
 	}
 	if svcName != "e2e-service" {
 		t.Errorf("expected ServiceName=e2e-service, got %s", svcName)
