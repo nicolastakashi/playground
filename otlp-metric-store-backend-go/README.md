@@ -48,3 +48,27 @@ make test-integration
 - `otel_metrics_gauge_metadata` and `otel_metrics_sum_metadata` store metric identity and descriptive metadata.
 - `otel_metrics_gauge` and `otel_metrics_sum` store only datapoint values, timestamps, flags, and a `MetadataKey` reference.
 - Datapoint tables are partitioned by `toDate(TimeUnix)` and ordered by timestamp plus `MetadataKey` to support time-range queries without full table scans.
+
+## Query Flow
+
+Normalized reads follow a two-step contract:
+
+1. Query the metadata table to discover which series match filters such as service name, metric name, or datapoint attributes, and capture the returned `MetadataKey` values.
+2. Query the datapoint table for a time range using those `MetadataKey` values.
+
+This is a behavioral contract, not a single required SQL shape. Metadata discovery may scan metadata tables when needed; the bounded read guarantee applies to the datapoint tables once the relevant `MetadataKey` values are known.
+
+Illustrative example:
+
+```sql
+SELECT MetadataKey, ServiceName, MetricName
+FROM otel_metrics_gauge_metadata FINAL
+WHERE ServiceName = 'checkout' AND MetricName = 'http.server.duration';
+
+SELECT TimeUnix, Value, Flags
+FROM otel_metrics_gauge
+WHERE MetadataKey IN (<selected keys>)
+  AND TimeUnix >= toDateTime64('2026-05-03 10:00:00', 9)
+  AND TimeUnix <= toDateTime64('2026-05-03 11:00:00', 9)
+ORDER BY TimeUnix;
+```
