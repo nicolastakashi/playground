@@ -49,6 +49,16 @@ make test-integration
 - `otel_metrics_gauge` and `otel_metrics_sum` store only datapoint values, timestamps, flags, and a `MetadataKey` reference.
 - Datapoint tables are partitioned by `toDate(TimeUnix)` and ordered by timestamp plus `MetadataKey` to support time-range queries without full table scans.
 
+## Write Flow
+
+Normalized writes stay synchronous and request-scoped:
+
+1. The server maps one export request into normalized gauge and sum batches.
+2. Each populated metric kind writes one metadata batch and one datapoint batch for that request.
+3. Gauge and sum pipelines may run independently when both kinds are present, but each kind still writes metadata before datapoints.
+
+This is a scoped throughput improvement, not a broader ingestion redesign. The service does not currently provide background buffering, cross-request batching, retries, idempotent replay handling, or transactional all-or-nothing guarantees across tables or metric kinds. If a storage write fails, the export call fails, and rows written earlier in the same request may already be persisted.
+
 ## Query Flow
 
 Normalized reads follow a two-step contract:
