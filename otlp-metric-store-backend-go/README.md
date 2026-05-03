@@ -2,6 +2,8 @@
 
 This service accepts OTLP metrics over gRPC and stores Gauge and Sum datapoints in ClickHouse using separate lookup tables for metric metadata.
 
+See `docs/storage-design.md` for the detailed schema rationale, query model, write semantics, and current limitations of the normalized storage layout.
+
 ## Requirements
 
 - Go 1.26
@@ -75,7 +77,9 @@ Weaver adoption, observability by design, and CI-based observability contract te
 
 - `otel_metrics_gauge_metadata` and `otel_metrics_sum_metadata` store metric identity and descriptive metadata.
 - `otel_metrics_gauge` and `otel_metrics_sum` store only datapoint values, timestamps, flags, and a `MetadataKey` reference.
-- Datapoint tables are partitioned by `toDate(TimeUnix)` and ordered by timestamp plus `MetadataKey` to support time-range queries without full table scans.
+- Datapoint tables are partitioned by `toDate(TimeUnix)` and ordered by timestamp plus `MetadataKey` to support the repository's time-bounded normalized query flow.
+
+`docs/storage-design.md` is the authoritative explanation of why the metadata tables use `ReplacingMergeTree`, why datapoint tables order by time first, and where the current scan-avoidance guarantees stop.
 
 ## Write Flow
 
