@@ -1,0 +1,85 @@
+mode: deployment
+
+namespaceOverride: observability
+
+image:
+  repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib
+  tag: 0.152.0
+
+clusterRole:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources:
+        - endpoints
+        - pods
+        - services
+      verbs: ["get", "list", "watch"]
+
+service:
+  enabled: true
+
+config:
+  receivers:
+    prometheus:
+      config:
+        scrape_configs:
+          - job_name: avalanche
+            scrape_interval: 15s
+            kubernetes_sd_configs:
+              - role: endpoints
+                namespaces:
+                  names:
+                    - observability
+            relabel_configs:
+              - source_labels: [__meta_kubernetes_service_name]
+                action: keep
+                regex: avalanche
+              - source_labels: [__meta_kubernetes_endpoint_port_name]
+                action: keep
+                regex: metrics
+          - job_name: prometheus
+            scrape_interval: 15s
+            static_configs:
+              - targets:
+                  - prometheus.observability.svc.cluster.local:9090
+          - job_name: otel-collector
+            scrape_interval: 15s
+            static_configs:
+              - targets:
+                  - otel-opentelemetry-collector.observability.svc.cluster.local:8888
+
+  processors:
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 90
+      spike_limit_percentage: 85
+    batch:
+      timeout: 1s
+      send_batch_size: 1024
+
+  exporters:
+    prometheusremotewrite:
+      endpoint: http://prometheus.observability.svc.cluster.local:9090/api/v1/write
+    debug:
+      verbosity: basic
+
+  extensions:
+    health_check:
+      endpoint: 0.0.0.0:13133
+
+  service:
+    extensions: [health_check]
+    pipelines:
+      metrics:
+        receivers: [prometheus]
+        processors: [memory_limiter, batch]
+        exporters: [prometheusremotewrite, debug]
+
+resources:
+  limits:
+    cpu: "2"
+    memory: 2Gi
+  requests:
+    cpu: "250m"
+    memory: 512Mi
