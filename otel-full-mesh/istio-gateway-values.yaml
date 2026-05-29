@@ -1,0 +1,14 @@
+labels:
+  app: istio-ingressgateway
+  istio: ingressgateway
+
+podAnnotations:
+  inject.istio.io/templates: gateway
+  sidecar.istio.io/inject: "true"
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "15020"
+  prometheus.io/path: /stats/prometheus
+  prometheus.istio.io/secure-port: "15091"
+
+service:
+  type: ClusterIP

@@ -5,9 +5,9 @@ TARGETS ?= 1000
 CARDINALITY ?= 100
 HELM_EXTRA_VALUES ?=
 
-.PHONY: setup install-cluster install-namespace install-mtls install-istio install-prometheus install-otel-collector install-avalanche \
-	install-all destroy uninstall-cluster uninstall-istio uninstall-prometheus uninstall-otel-collector uninstall-avalanche \
-	uninstall-all status verify-mtls logs-otel logs-prometheus logs-avalanche portforward-prometheus help
+.PHONY: setup install-cluster install-namespace install-mtls install-istio install-gateway install-istio-metrics install-prometheus install-otel-collector install-avalanche \
+	install-all destroy uninstall-cluster uninstall-istio uninstall-gateway uninstall-istio-metrics uninstall-prometheus uninstall-otel-collector uninstall-avalanche \
+	uninstall-all status verify-mtls logs-otel logs-prometheus logs-avalanche logs-gateway portforward-prometheus help
 
 help:
 	@echo "Available targets:"
@@ -16,6 +16,8 @@ help:
 	@echo "  install-namespace     - Create namespace and label it for injection"
 	@echo "  install-mtls          - Apply strict mTLS policy after Istio is installed"
 	@echo "  install-istio         - Install upstream Istio Helm charts"
+	@echo "  install-gateway       - Install the upstream Istio ingress gateway"
+	@echo "  install-istio-metrics - Enable secure Istio sidecar and gateway metric scraping"
 	@echo "  install-prometheus    - Install Prometheus remote write receiver"
 	@echo "  install-otel-collector - Install OpenTelemetry Collector"
 	@echo "  install-avalanche     - Install Avalanche metrics generator"
@@ -23,6 +25,8 @@ help:
 	@echo "  destroy               - Remove the lab and delete the k3d cluster"
 	@echo "  uninstall-cluster     - Delete k3d cluster"
 	@echo "  uninstall-istio       - Uninstall Istio control plane"
+	@echo "  uninstall-gateway     - Uninstall the upstream Istio ingress gateway"
+	@echo "  uninstall-istio-metrics - Remove secure Istio metric scraping resources"
 	@echo "  uninstall-prometheus  - Uninstall Prometheus"
 	@echo "  uninstall-otel-collector - Uninstall OpenTelemetry Collector"
 	@echo "  uninstall-avalanche   - Uninstall Avalanche"
@@ -32,6 +36,7 @@ help:
 	@echo "  logs-otel             - Show OpenTelemetry Collector logs"
 	@echo "  logs-prometheus       - Show Prometheus logs"
 	@echo "  logs-avalanche        - Show Avalanche logs"
+	@echo "  logs-gateway          - Show Istio gateway logs"
 	@echo "  portforward-prometheus - Forward Prometheus to localhost:9090"
 	@echo ""
 	@echo "Configuration (can be overridden):"
@@ -75,6 +80,20 @@ install-istio:
 	kubectl rollout status deployment/istiod -n istio-system --timeout=180s
 	@echo "Istio installation completed."
 
+install-gateway:
+	@echo "Installing upstream Istio ingress gateway..."
+	helm repo add istio https://istio-release.storage.googleapis.com/charts
+	helm repo update
+	helm upgrade --install istio-ingressgateway istio/gateway --version $(ISTIO_VERSION) -n istio-system -f istio-gateway-values.yaml
+	kubectl rollout status deployment/istio-ingressgateway -n istio-system --timeout=180s
+	@echo "Istio ingress gateway installation completed."
+
+install-istio-metrics:
+	@echo "Applying secure Istio metrics scraping resources..."
+	kubectl apply -f secure-sidecar-metrics.yaml
+	kubectl apply -f secure-gateway-metrics.yaml
+	@echo "Secure Istio metrics scraping resources applied."
+
 install-prometheus:
 	@echo "Installing Prometheus remote write receiver..."
 	kubectl apply -f prometheus.yaml
@@ -100,7 +119,7 @@ install-avalanche:
 	kubectl rollout status deployment/avalanche -n $(NAMESPACE) --timeout=180s
 	@echo "Avalanche installation completed."
 
-install-all: install-namespace install-istio install-mtls install-prometheus install-otel-collector install-avalanche
+install-all: install-namespace install-istio install-gateway install-mtls install-istio-metrics install-prometheus install-otel-collector install-avalanche
 	@echo "All lab components installed successfully."
 
 destroy: uninstall-all uninstall-cluster
@@ -124,7 +143,16 @@ uninstall-istio:
 	helm uninstall istio-base -n istio-system --ignore-not-found
 	kubectl delete namespace istio-system --ignore-not-found=true
 
-uninstall-all: uninstall-avalanche uninstall-otel-collector uninstall-prometheus uninstall-istio
+uninstall-gateway:
+	@echo "Uninstalling Istio ingress gateway..."
+	helm uninstall istio-ingressgateway -n istio-system --ignore-not-found
+
+uninstall-istio-metrics:
+	@echo "Removing secure Istio metrics scraping resources..."
+	kubectl delete -f secure-gateway-metrics.yaml --ignore-not-found=true
+	kubectl delete -f secure-sidecar-metrics.yaml --ignore-not-found=true
+
+uninstall-all: uninstall-avalanche uninstall-otel-collector uninstall-prometheus uninstall-istio-metrics uninstall-gateway uninstall-istio
 	@echo "Removing namespace resources..."
 	@if kubectl get crd peerauthentications.security.istio.io >/dev/null 2>&1; then \
 		kubectl delete -f namespace.yaml --ignore-not-found=true; \
@@ -192,6 +220,9 @@ logs-prometheus:
 
 logs-avalanche:
 	kubectl logs deployment/avalanche -n $(NAMESPACE) --tail=50
+
+logs-gateway:
+	kubectl logs deployment/istio-ingressgateway -n istio-system --tail=50
 
 portforward-prometheus:
 	@echo "Access Prometheus at http://localhost:9090"

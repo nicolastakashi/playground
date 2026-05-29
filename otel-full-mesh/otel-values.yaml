@@ -6,6 +6,26 @@ image:
   repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib
   tag: 0.152.0
 
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/path: /stats/prometheus
+  prometheus.istio.io/secure-port: "15091"
+  sidecar.istio.io/userVolumeMount: |
+    [{"name":"istio-certs","mountPath":"/etc/istio-certs","readOnly":true}]
+  proxy.istio.io/config: |
+    proxyMetadata:
+      OUTPUT_CERTS: /etc/istio-certs
+
+extraVolumes:
+  - name: istio-certs
+    emptyDir:
+      medium: Memory
+
+extraVolumeMounts:
+  - name: istio-certs
+    mountPath: /etc/istio-certs
+    readOnly: true
+
 clusterRole:
   create: true
   rules:
@@ -43,6 +63,42 @@ config:
             static_configs:
               - targets:
                   - prometheus.observability.svc.cluster.local:9090
+          - job_name: istio-secure-merged-metrics
+            scrape_interval: 15s
+            kubernetes_sd_configs:
+              - role: pod
+                namespaces:
+                  names:
+                    - observability
+                    - istio-system
+            relabel_configs:
+              - source_labels: [__meta_kubernetes_pod_annotation_prometheus_istio_io_secure_port]
+                action: keep
+                regex: .+
+              - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                action: keep
+                regex: "true"
+              - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+                action: replace
+                target_label: __metrics_path__
+                regex: (.+)
+              - source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_annotation_prometheus_istio_io_secure_port]
+                action: replace
+                target_label: __address__
+                regex: (.+);(.+)
+                replacement: $1:$2
+              - source_labels: [__meta_kubernetes_namespace]
+                action: replace
+                target_label: kubernetes_namespace
+              - source_labels: [__meta_kubernetes_pod_name]
+                action: replace
+                target_label: kubernetes_pod_name
+            scheme: https
+            tls_config:
+              ca_file: /etc/istio-certs/root-cert.pem
+              cert_file: /etc/istio-certs/cert-chain.pem
+              key_file: /etc/istio-certs/key.pem
+              insecure_skip_verify: true
           - job_name: otel-collector
             scrape_interval: 15s
             static_configs:

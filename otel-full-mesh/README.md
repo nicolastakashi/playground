@@ -10,6 +10,8 @@ Full-mesh OpenTelemetry lab in the `observability` namespace with upstream Istio
 - Prometheus running as a remote write receiver inside the mesh
 - OpenTelemetry Collector scraping in-mesh workloads and remote-writing to Prometheus
 - Avalanche generating Prometheus metrics behind a headless service
+- Upstream Istio ingress gateway installed in `istio-system`
+- Secure Istio sidecar and gateway metrics scraping over `15091` with Istio-issued client certs
 
 ## Usage
 
@@ -25,3 +27,4 @@ make portforward-prometheus
 - The `observability` namespace is created and labeled for automatic sidecar injection before workloads are installed.
 - Traffic between the collector, Avalanche, and Prometheus stays inside the mesh and uses Istio mTLS automatically.
 - Registry-only mode blocks unknown external egress from sidecars, so the lab only relies on Kubernetes service registry destinations.
+- Application metrics scraping remains unchanged; Istio sidecar and gateway metrics are added as a separate secure scrape job.

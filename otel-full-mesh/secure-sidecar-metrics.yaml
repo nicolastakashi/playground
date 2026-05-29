@@ -1,0 +1,12 @@
+apiVersion: networking.istio.io/v1
+kind: Sidecar
+metadata:
+  name: secure-metrics
+  namespace: observability
+spec:
+  ingress:
+    - port:
+        number: 15091
+        name: https-metrics
+        protocol: HTTP
+      defaultEndpoint: 127.0.0.1:15020

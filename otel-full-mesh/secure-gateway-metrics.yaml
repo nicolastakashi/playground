@@ -1,0 +1,52 @@
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: secure-metrics
+  namespace: istio-system
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 15091
+        name: https-metrics
+        protocol: HTTPS
+      tls:
+        mode: ISTIO_MUTUAL
+      hosts: ["*"]
+---
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: gateway-admin
+  namespace: istio-system
+spec:
+  hosts:
+    - gateway-admin.local
+  location: MESH_INTERNAL
+  ports:
+    - number: 15020
+      name: http-metrics
+      protocol: HTTP
+  resolution: STATIC
+  endpoints:
+    - address: 127.0.0.1
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: gateway-metrics
+  namespace: istio-system
+spec:
+  hosts: ["*"]
+  gateways:
+    - secure-metrics
+  http:
+    - match:
+        - uri:
+            prefix: /stats/prometheus
+      route:
+        - destination:
+            host: gateway-admin.local
+            port:
+              number: 15020

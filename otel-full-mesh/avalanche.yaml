@@ -10,6 +10,10 @@ spec:
       app: avalanche
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /stats/prometheus
+        prometheus.istio.io/secure-port: "15091"
       labels:
         app: avalanche
     spec:
